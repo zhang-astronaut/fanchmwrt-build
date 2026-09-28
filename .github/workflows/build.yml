@@ -1,0 +1,275 @@
+﻿name: Auto Build FanchmWrt
+
+on:
+  workflow_dispatch:   # 鎵嬪姩瑙﹀彂锛堝己鍒堕噸寤猴級
+  push:
+    branches: [main]   # 閰嶇疆鍙樻洿鎺ㄩ€佸悗绔嬪嵆缂栬瘧楠岃瘉锛坆ot 鎻愪氦甯?[skip ci] 涓嶄細寰幆瑙﹀彂锛?
+  schedule:
+    - cron: '17 */6 * * *'   # 姣?6 灏忔椂妫€鏌ヤ竴娆′笂娓告洿鏂?
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    name: Check upstream updates
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.c.outputs.build }}
+      sha: ${{ steps.c.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: c
+        name: Compare upstream HEAD with last built sha
+        run: |
+          set -e
+          BRANCH=$(curl -sf https://api.github.com/repos/fanchmwrt/fanchmwrt | jq -r .default_branch)
+          SHA=$(curl -sf "https://api.github.com/repos/fanchmwrt/fanchmwrt/commits/$BRANCH" | jq -r .sha)
+          echo "upstream $BRANCH HEAD: $SHA"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          OLD=$(cat upstream_sha 2>/dev/null || true)
+          echo "last built sha: ${OLD:-<none>}"
+          # 鍙湁瀹氭椂浠诲姟鎵嶆寜 sha 姣斿璺宠繃锛涙墜鍔ㄨЕ鍙戝拰 push锛堥厤缃彉鏇达級涓€寰嬬紪璇?
+          if [ "$OLD" = "$SHA" ] && [ "${{ github.event_name }}" = "schedule" ]; then
+            echo "no upstream update, skip build"
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    name: Build firmware images
+    needs: check
+    if: needs.check.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      SHA: ${{ needs.check.outputs.sha }}
+    steps:
+      # 蹇呴』鍦?checkout 涔嬪墠锛氳鍔ㄤ綔浼氭竻绌?$GITHUB_WORKSPACE 骞舵寕杞?LVM 鍗?
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@v10
+        with:
+          # runner 闀滃儚鎸佺画鍙樺ぇ锛?192 浠嶄細鎶?/var/cache/apt/archives 鎸ゆ弧锛坮un 23 exit 100锛?
+          root-reserve-mb: 16384
+          remove-android: 'true'
+          remove-dotnet: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-docker-images: 'true'
+          remove-large-packages: 'true'
+
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL 2>/dev/null || true
+          sudo apt-get clean
+          sudo rm -rf /var/cache/apt/archives/*
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential clang flex bison g++ gawk \
+            gcc-multilib g++-multilib gettext git libncurses-dev libssl-dev \
+            python3 python3-setuptools rsync unzip zlib1g-dev file wget swig \
+            qemu-utils jq curl
+          sudo apt-get clean
+          sudo rm -rf /var/cache/apt/archives/*
+
+      - name: Clone upstream at recorded sha
+        run: |
+          git clone --depth 1 https://github.com/fanchmwrt/fanchmwrt.git openwrt
+          cd openwrt
+          git log --oneline -1
+
+      - name: Add passwall / UA3F feeds
+        run: |
+          cd openwrt
+          # passwall + 鍏朵緷璧栧寘 feed锛堜笂娓?fanchmwrt 涓嶅惈锛岄渶鎵嬪姩娣诲姞锛?
+          cat >> feeds.conf.default <<'EOF'
+          src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git;main
+          src-git passwall https://github.com/Openwrt-Passwall/openwrt-passwall.git;main
+          src-git easytier https://github.com/EasyTier/luci-app-easytier.git;main
+          src-git istore https://github.com/linkease/istore.git;main
+          EOF
+          # EQoS (not in official luci feed)
+          git clone --depth 1 https://github.com/Huangjoe123/luci-app-eqos.git package/luci-app-eqos
+          git clone --depth 1 https://github.com/sbwml/luci-app-diskman.git package/luci-app-diskman-src
+          mv package/luci-app-diskman-src/luci-app-diskman package/luci-app-diskman
+          rm -rf package/luci-app-diskman-src
+          sed -i "s/+tc /+tc-tiny /" package/luci-app-eqos/Makefile
+          # UA3F 瀹樻柟婧愮爜鐩存帴浣滀负 package锛堝惈 LuCI 鐣岄潰锛岄潪鏍囧噯 feed 甯冨眬锛?
+          git clone --depth 1 https://github.com/SunBK201/UA3F.git package/UA3F
+          # Build/Prepare 鐩存帴璋?po2lmo锛屾樉寮忎緷璧?luci-base/host锛堣 host 宸ュ叿鐨勬潵婧愶級
+          sed -i 's/^PKG_BUILD_DEPENDS:=golang\/host$/PKG_BUILD_DEPENDS:=golang\/host luci-base\/host/' \
+            package/UA3F/openwrt/Makefile
+          # 鍏抽敭琛ヤ竵锛歎A3F 寮€鏈虹珵鎬佷慨澶?
+          # 鏍瑰洜锛氬紑鏈烘椂 WAN 榛樿璺敱鏈氨缁?鈫?BPF TC "no eligible interfaces" 鈫?杩炲穿
+          # procd 榛樿鍙噸璇?5 娆″嵆鏀惧純 鈫?UA3F 姘镐箙韬哄钩锛堟牎鍥綉鐪嬪埌瑁?UA 鈫?灏佺锛?
+          # 淇锛歳espawn 绗笁鍙傛暟 0 = 鏃犻檺閲嶈瘯锛岀瓑璺敱灏辩华鍚庤嚜鍔ㄦ仮澶?
+          sed -i 's/^    procd_set_param respawn$/    procd_set_param respawn 3600 5 0/' \
+            package/UA3F/openwrt/files/ua3f.init
+          grep -n 'procd_set_param respawn' package/UA3F/openwrt/files/ua3f.init
+
+      - name: Apply fwx TPROXY stats patch + custom config
+        run: |
+          cd openwrt
+          PATCH="$GITHUB_WORKSPACE/fwx-tproxy-stat.patch"
+          if [ -f "$PATCH" ]; then
+            git apply --check "$PATCH" 2>/dev/null && \
+              git apply "$PATCH" || \
+              patch -p1 --forward < "$PATCH" || \
+              echo "WARN: patch no longer applies cleanly (upstream changed fwx), continuing without it"
+          fi
+          cp "$GITHUB_WORKSPACE/fanchmwrt.config" .config
+          # Pin Chelsio T4/T5/T6 (T520) into kernel config
+          cat "$GITHUB_WORKSPACE/package/kmod-cxgb4/kernel-config" >> target/linux/x86/config-6.12
+          # local packages (user-sessiond-ct, srunpy, luci-app-srunpy, ...)
+          if [ -d "$GITHUB_WORKSPACE/package" ]; then
+            for d in "$GITHUB_WORKSPACE/package"/*; do
+              [ -d "$d" ] || continue
+              name=$(basename "$d")
+              rm -rf "package/$name"
+              cp -a "$d" "package/"
+            done
+          fi
+
+      - name: Update feeds
+        run: |
+          cd openwrt
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+          # iStore luci-app-store depends on +tar; this tree has no CONFIG_PACKAGE_tar
+          # (busybox provides tar). Drop the unresolvable dep so the package can select.
+          if [ -f feeds/istore/luci/luci-app-store/Makefile ]; then
+            sed -i 's/ +tar / /; s/+tar //' feeds/istore/luci/luci-app-store/Makefile
+            grep -n 'LUCI_DEPENDS' feeds/istore/luci/luci-app-store/Makefile || true
+          fi
+
+      # 鈿狅笍 閲嶈闄烽槺锛?026-09-13 瀹氫綅锛夛細
+      # `make defconfig` 璧扮殑鏄?kconfig 鐨?--defconfig 妯″紡锛屼細鎶?fanchmwrt.config 閲?
+      # 涓€閮ㄥ垎 =y 绗﹀彿闈欓粯閲嶇疆涓?n锛堝疄娴?26 涓細docker 鍏ㄥ妗躲€乴uci-app-dockerman銆?
+      # luci-app-fwx-app-center銆亁ray-core銆乻ing-box銆乿2ray-geoip/geosite銆乬eoview銆乼cping銆?
+      # 鍙婂叾渚濊禆搴撶瓑锛夛紝鏃㈡棤 warning 涔熶笉鎶ラ敊锛岄暅鍍忕収鏍风紪璇戞垚鍔熴€?
+      # 鐓ф牱鍙戝竷 Release 鈥斺€?缁撴灉灏辨槸"缂栬瘧鎴愬姛浣嗗寘閲屾病鏈?passwall2"銆?
+      # 宸叉帓闄わ細渚濊禆涓嶆弧瓒筹紙鍚屽唴瀹?--olddefconfig 鍏ㄩ儴淇濈暀锛夈€佺鍙蜂笉瀛樺湪銆侀噸澶嶆潯鐩€丆RLF銆?
+      # 鏋舵瀯鏉′欢锛坸86_64=y锛夈€傚洜姝よ繖閲屽湪 defconfig 涔嬪悗寮哄埗鍥炲～ + olddefconfig 鍥哄寲锛?
+      # 骞剁敤鏂█鎶?闈欓粯涓㈠け"鍙樻垚"绔嬪嵆澶辫触"銆?
+      - name: defconfig + enforce required packages
+        run: |
+          cd openwrt
+          make defconfig
+          REQUIRED="ua3f geoview tcping v2ray-geoip v2ray-geosite lyaml \
+                    chinadns-ng microsocks dns2socks ipt2socks \
+                    docker dockerd docker-compose containerd runc tini btrfs-progs ttyd \
+                    luci-app-dockerman luci-i18n-dockerman-zh-cn \
+                    luci-app-fwx-app-center luci-i18n-fwx-app-center-zh-cn \
+                    libattr liblzo libseccomp libuv libwebsockets-full libnetfilter-queue \
+                    kmod-mt7921u kmod-mt7922-firmware wpad-mesh-mbedtls \
+                    user-sessiond-ct \
+                    srunpy luci-app-srunpy python3-requests \
+                    openssh-sftp-server dropbear \
+                    easytier luci-app-easytier \
+                    luci-app-store taskd luci-lib-taskd luci-lib-xterm mount-utils script-utils coreutils-stty libuci-lua \
+                    kmod-mt7921e kmod-mt7921-firmware \
+                    kmod-iwlwifi iwlwifi-firmware-ax200 iwlwifi-firmware-ax201 \
+                    kmod-ath9k kmod-rtw88-8822ce kmod-rtw89-8852ae \
+                    sqm-scripts luci-app-sqm luci-i18n-sqm-zh-cn luci-app-eqos luci-app-diskman luci-i18n-eqos-zh-cn kmod-sched-cake kmod-sched-fq-pie kmod-ifb \
+                    tc-tiny kmod-cxgb4"
+          for s in $REQUIRED; do
+            sed -i "/^# CONFIG_PACKAGE_${s} is not set$/d" .config
+            grep -q "^CONFIG_PACKAGE_${s}=y$" .config || echo "CONFIG_PACKAGE_${s}=y" >> .config
+          done
+          ./scripts/config/conf --olddefconfig Config.in
+          fail=0
+          for s in $REQUIRED; do
+            if grep -q "^CONFIG_PACKAGE_${s}=y$" .config; then
+              echo "  OK   $s"
+            else
+              echo "  FAIL $s (dropped by defconfig/missing)"
+              fail=1
+            fi
+          done
+          [ "$fail" = "0" ] || { echo "required packages missing, abort build"; exit 1; }
+          make download -j$(nproc)
+          find dl -size -1024c -exec rm -f {} \; || true
+
+      - name: Build firmware
+        run: |
+          cd openwrt
+          make -j$(nproc) || make -j1 V=s
+
+      - name: Convert to VHD / VHDX
+        run: |
+          cd openwrt/bin/targets/x86/64
+          mkdir -p images
+          for img in *-combined-*.img.gz; do
+            [ -e "$img" ] || continue
+            base=$(basename "$img" .img.gz)
+            gunzip -c "$img" > "images/$base.img"
+            qemu-img convert -O vhdx "images/$base.img" "images/$base.vhdx"
+            qemu-img convert -O vpc "images/$base.img" "images/$base.vhd"
+            rm -f "images/$base.img"
+          done
+          cp *.img.gz images/ 2>/dev/null || true
+          cp *.manifest images/ 2>/dev/null || true
+          cp sha256sums images/ 2>/dev/null || true
+
+      - name: Fetch SRunPy release packages
+        run: |
+          # Always attach upstream SRunPy apk/ipk to this firmware Release
+          # (also baked into image via package/srunpy + luci-app-srunpy)
+          set -e
+          DEST="openwrt/bin/targets/x86_64/images"
+          if [ ! -d "$DEST" ]; then DEST="openwrt/bin/targets/x86/64/images"; fi
+          mkdir -p "$DEST"
+          BASE="https://github.com/HofNature/SRunPy-OpenWRT/releases/download/v1.0.1"
+          for f in srunpy-1.0.1-r1.apk luci-app-srunpy-1.0.0-r1.apk srunpy-1.0.1.ipk luci-app-srunpy-1.0.0.ipk; do
+            curl -fsSL -o "$DEST/$f" "$BASE/$f"
+            echo "got $DEST/$f ($(wc -c < "$DEST/$f") bytes)"
+          done
+          cd "$DEST" && sha256sum * > sha256sums.txt
+
+      - name: Record built upstream sha
+        run: |
+          echo "$SHA" > upstream_sha
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add upstream_sha
+          git commit -m "chore: built upstream $SHA [skip ci]" || true
+          git push || true
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: fanchmwrt-images-${{ github.run_number }}
+          path: openwrt/bin/targets/x86/64/images/
+          retention-days: 14
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: r${{ github.run_number }}
+          name: FanchmWrt build r${{ github.run_number }}
+          body: |
+            鍩轰簬涓婃父 fanchmwrt/fanchmwrt @ `${{ needs.check.outputs.sha }}` 鑷姩缂栬瘧銆?
+            - 宸插簲鐢?fwx TPROXY 娴侀噺缁熻琛ヤ竵
+            - 鍐呯疆 UA3F锛堝惈 LuCI 鐣岄潰 + 寮€鏈虹珵鎬佹棤闄愰噸璇曚慨澶嶏級
+            - 鍐呯疆 PassWall锛堥潪 PassWall2锛? LuCI 鐣岄潰 + / 鍙屾牳蹇?
+            - 鍐呯疆鏃犵嚎椹卞姩涓?wpad-mesh-mbedtls锛?02.11s mesh + SAE锛屾浛鎹?wpad-basic锛?
+            - 鍐呯疆 SRunPy 鏍″洯缃戣嚜鍔ㄧ櫥褰曪紙srunpy + luci-app-srunpy + python3-requests锛夛紱Release 闄勫甫涓婃父 apk/ipk
+            - 鍐呯疆 sftp-server锛坥penssh-sftp-server + dropbear SFTP锛変笌 EasyTier锛坋asytier + luci-app-easytier锛?
+            - 鍐呯疆甯哥敤鏃犵嚎椹卞姩锛歬mod-mt7921e(PCIe)/mt7921u(USB) + iwlwifi/ath9k/rtw88/rtw89/brcmfmac 绛?
+            - 閰嶇疆瑙佷粨搴?fanchmwrt.config锛?G 鍒嗗尯 / Docker / UA3F 鍏ㄥ kmod / 搴旂敤涓績锛?
+            - 缂栬瘧鏃跺 defconfig 闈欓粯涓㈠寘鍋氫簡寮哄埗鍥炲～ + 鏂█鏍￠獙锛堣 workflow锛?
+            - 鈿狅笍 UA3F 涓?PassWall 鍏卞瓨娉ㄦ剰锛歅assWall 鐨?TCP 浠ｇ悊鏂瑰紡璇蜂繚鎸侀粯璁?redirect锛?
+              鍕挎敼 tproxy锛堜細涓?UA3F 鐨?TPROXY 鍦?mangle PREROUTING 鎶㈠寘锛?
+          files: openwrt/bin/targets/x86/64/images/*
+
+
+
+
+
+
+
+
