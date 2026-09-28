@@ -28,7 +28,8 @@ jobs:
       sha: ${{ steps.c.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
-      - name: Compare upstream HEAD with last built sha
+      - id: c
+        name: Compare upstream HEAD with last built sha
         env:
           CI_EVENT: ${{ github.event_name }}
         run: bash scripts/check-upstream.sh
