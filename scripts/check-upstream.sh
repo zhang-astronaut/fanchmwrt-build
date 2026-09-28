@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # 上游 fanchmwrt/fanchmwrt HEAD 与本仓库 last-built sha 比对。
-# 仅 schedule 事件在上游无变化时跳过构建；push / workflow_dispatch 一律构建。
-# 输出写入 $GITHUB_OUTPUT（本地直接运行时回显到 stdout）：sha=<...> build=true|false
+# 输出写入 $GITHUB_OUTPUT（本地直接运行时回显到 stdout）：sha=<...> changed=true|false
+# 注意：本脚本只判断"上游有没有变"，不决定要不要构建——
+#   push / workflow_dispatch 一律构建（配置变更也要出固件）；
+#   schedule 只在上游变化时由 workflow 里的 dispatch-build job 转发一次 workflow_dispatch。
 set -euo pipefail
 
 UPSTREAM_REPO="fanchmwrt/fanchmwrt"
@@ -17,9 +19,10 @@ OLD=$(cat "$REPO_ROOT/upstream_sha" 2>/dev/null || true)
 echo "last built sha: ${OLD:-<none>}"
 echo "sha=$SHA" >> "$OUT"
 
-if [ "$OLD" = "$SHA" ] && [ "${CI_EVENT:-push}" = "schedule" ]; then
-  echo "no upstream update, skip build"
-  echo "build=false" >> "$OUT"
+if [ "$OLD" = "$SHA" ]; then
+  echo "upstream unchanged"
+  echo "changed=false" >> "$OUT"
 else
-  echo "build=true" >> "$OUT"
+  echo "upstream changed"
+  echo "changed=true" >> "$OUT"
 fi

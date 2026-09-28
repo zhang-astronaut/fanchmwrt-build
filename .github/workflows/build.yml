@@ -8,36 +8,48 @@ on:
       - 'docs/**'
       - 'README.md'
   schedule:
-    - cron: '17 */6 * * *' # 每 6 小时检查一次上游更新（无变化时跳过）
+    - cron: '17 */6 * * *' # 每 6 小时检查上游；有变化才转发一次 workflow_dispatch 构建
 
 permissions:
   contents: write
+  actions: write # schedule 的 dispatch-build 需要 workflow_dispatch 权限
 
-# 同一时间只允许一个构建：新构建开始时取消进行中的旧构建，
-# 避免 schedule / push / 手动触发互相堆积（旧仓库曾因此排队数小时）
+# 并发语义（2026-09-29 教训：schedule 曾以"上游无变化"为由取消跑了一半的 push 构建）：
+# - push / workflow_dispatch 共用 firmware-build 组，cancel-in-progress：新构建顶替旧构建；
+# - schedule 只做"比对 + 转发 dispatch"，独占 firmware-check 组且永不取消别人。
 concurrency:
-  group: firmware-build
-  cancel-in-progress: true
+  group: ${{ github.event_name == 'schedule' && 'firmware-check' || 'firmware-build' }}
+  cancel-in-progress: ${{ github.event_name != 'schedule' }}
 
 jobs:
   check:
     name: Check upstream updates
     runs-on: ubuntu-latest
     outputs:
-      build: ${{ steps.c.outputs.build }}
+      changed: ${{ steps.c.outputs.changed }}
       sha: ${{ steps.c.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
       - id: c
         name: Compare upstream HEAD with last built sha
-        env:
-          CI_EVENT: ${{ github.event_name }}
         run: bash scripts/check-upstream.sh
+
+  # 仅 schedule 且上游有变化时触发一次真正的构建（走 firmware-build 组，不与 push 抢跑）
+  dispatch-build:
+    name: Trigger build (upstream changed)
+    needs: check
+    if: github.event_name == 'schedule' && needs.check.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch build workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run build.yml --repo "$GITHUB_REPOSITORY" --ref main
 
   build:
     name: Build firmware images
     needs: check
-    if: needs.check.outputs.build == 'true'
+    if: github.event_name != 'schedule' # schedule 不直接构建，由 dispatch-build 转发
     runs-on: ubuntu-latest
     timeout-minutes: 360
     env:

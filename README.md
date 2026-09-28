@@ -97,9 +97,11 @@ docs/compose/spec/            # 设计记录（会话统计 / IO 优化）
 ## CI 工作方式
 
 - **触发**：push 到 main（`docs/**`、`README.md` 改动不触发）；每 6 小时检查上游
-  fanchmwrt/fanchmwrt，无变化则跳过；`workflow_dispatch` 手动强制构建。
-- **concurrency**：`firmware-build` 组 + `cancel-in-progress`，同一时间只有一个构建，
-  不会像旧仓库那样排队堆积。
+  fanchmwrt/fanchmwrt，**有变化才转发一次 `workflow_dispatch`**；手动触发即强制构建。
+- **并发语义**：push / dispatch 共用 `firmware-build` 组（新构建顶替旧构建，不排队堆积）；
+  schedule 独占 `firmware-check` 组且**永不取消在途构建**——
+  它只做 sha 比对 + 转发 dispatch（2026-09-29 教训：schedule 曾用"上游无变化"为由
+  取消跑了 3 小时的 push 构建，已用分组根治）。
 - **双重包断言**：REQUIRED 回填后 olddefconfig 固化再逐个校验（防 defconfig
   静默丢包——“编译绿了但镜像里没有包”的回归防线）；FORBIDDEN 反向校验终态。
 - **产物**：squashfs/ext4 × UEFI/BIOS 镜像（img.gz + vhd + vhdx）+ manifest +
