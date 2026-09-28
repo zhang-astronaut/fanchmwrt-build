@@ -1,6 +1,8 @@
+# Chelsio T4/T5/T6（T520-CR）—— 只编 cxgb4；T1/T3 老卡刻意排除
+# 由 scripts/prepare-tree.sh 按符号去重后合并进 target/linux/x86/config-*
 CONFIG_NET_VENDOR_CHELSIO=y
-CONFIG_CHELSIO_LIB=m
 CONFIG_CHELSIO_T4=m
+# CONFIG_CHELSIO_LIB is not set
 # CONFIG_CHELSIO_T1 is not set
 # CONFIG_CHELSIO_T1_1G is not set
 # CONFIG_CHELSIO_T3 is not set

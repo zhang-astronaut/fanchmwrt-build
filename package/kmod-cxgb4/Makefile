@@ -1,4 +1,4 @@
-﻿include $(TOPDIR)/rules.mk
+include $(TOPDIR)/rules.mk
 include $(INCLUDE_DIR)/kernel.mk
 include $(INCLUDE_DIR)/package.mk
 

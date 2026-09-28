@@ -1,3 +1,15 @@
-package/kmod-chelsio/kernel-config text eol=lf
-*.sh text eol=lf
-
+# 统一 LF：shell / yaml / lua / config / patch 里混进 CRLF 会直接弄坏
+# CI 脚本、内核配置合并和 git apply（旧仓库踩过 kmod-chelsio kernel-config CRLF 的坑）
+* text=auto
+*.sh   text eol=lf
+*.yml  text eol=lf
+*.lua  text eol=lf
+*.c    text eol=lf
+*.py   text eol=lf
+*.md   text eol=lf
+*.txt  text eol=lf
+*.patch text eol=lf
+Makefile text eol=lf
+package/*/kernel-config text eol=lf
+*.img binary
+*.gz  binary

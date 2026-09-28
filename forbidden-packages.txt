@@ -1,0 +1,29 @@
+# 禁止进入固件的包（终态见 README「已移除」）。
+# enforce-config.sh 在断言阶段检查：这里任何一个变成 =y 都会让构建失败，
+# 防止依赖关系或配置漂移把已明确移除的东西悄悄带回镜像。
+
+# PassWall 系（已移除；若将来加回，TCP 必须用 redirect，禁止 tproxy）
+luci-app-passwall
+luci-app-passwall2
+xray-core
+sing-box
+sing-box-tiny
+
+# 旧 QoS 实现（与 SQM 重复）
+qos-scripts
+luci-app-qos
+
+# Chelsio T1/T3 老卡驱动（T520 只需要 cxgb4；且易触发 kconfig 交互）
+kmod-cxgb
+kmod-cxgb3
+kmod-libcxgb
+firmware-cxgb
+firmware-cxgb3
+
+# 与 kmod-ath10k 文件冲突
+kmod-ath10k-ct
+
+# 与 wpad-mesh-mbedtls 冲突的 hostapd 变体
+wpad-basic-mbedtls
+wpad-basic-wolfssl
+wpad-mesh-openssl

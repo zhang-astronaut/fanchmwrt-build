@@ -1,0 +1,81 @@
+# 构建时强制 =y 并逐个断言的包清单（单一来源）。
+# CI 的 enforce-config.sh 读取本文件：先回填 .config，olddefconfig 固化后逐一校验，
+# 任何一个被 defconfig 静默裁剪都会让构建立即变红（防"CI 绿了但包没进镜像"）。
+# 增删包只改这个文件；不要在 workflow 里再散落硬编码清单。
+
+# --- UA3F / 校园网 ---
+ua3f
+srunpy
+luci-app-srunpy
+python3-requests
+
+# --- 用户会话统计（UA3F TPROXY 下可用，替代闭源 fwx_user.ko 路径） ---
+user-sessiond-ct
+
+# --- 无线：MT7922 USB / MT7921 PCIe / 常用驱动 / 802.11s mesh ---
+kmod-mt7921u
+kmod-mt7922-firmware
+kmod-mt7921e
+kmod-mt7921-firmware
+kmod-iwlwifi
+iwlwifi-firmware-ax200
+iwlwifi-firmware-ax201
+kmod-ath9k
+kmod-rtw88-8822ce
+kmod-rtw89-8852ae
+wpad-mesh-mbedtls
+
+# --- QoS：SQM（主，Cake/fq_codel）+ EQoS（辅） ---
+sqm-scripts
+luci-app-sqm
+luci-i18n-sqm-zh-cn
+kmod-sched-cake
+kmod-sched-fq-pie
+kmod-ifb
+tc-tiny
+luci-app-eqos
+luci-i18n-eqos-zh-cn
+
+# --- 磁盘管理（分区 / 格式化 / 挂载 / Swap） ---
+luci-app-diskman
+
+# --- Chelsio T520-CR 10G 网卡 ---
+kmod-cxgb4
+
+# --- Docker ---
+docker
+dockerd
+docker-compose
+containerd
+runc
+tini
+btrfs-progs
+luci-app-dockerman
+luci-i18n-dockerman-zh-cn
+
+# --- 应用中心 / 组网 / SFTP ---
+luci-app-fwx-app-center
+luci-i18n-fwx-app-center-zh-cn
+easytier
+luci-app-easytier
+openssh-sftp-server
+dropbear
+
+# --- iStore 软件中心及其依赖（+tar 依赖问题在 CI 里修正） ---
+luci-app-store
+taskd
+luci-lib-taskd
+luci-lib-xterm
+mount-utils
+script-utils
+coreutils-stty
+libuci-lua
+
+# --- UA3F / Docker 运行库 ---
+libattr
+liblzo
+libseccomp
+libuv
+libwebsockets-full
+libnetfilter-queue
+ttyd
