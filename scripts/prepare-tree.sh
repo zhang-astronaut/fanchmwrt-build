@@ -34,6 +34,19 @@ git clone --depth 1 https://github.com/SunBK201/UA3F.git package/UA3F
 sed -i 's/^PKG_BUILD_DEPENDS:=golang\/host$/PKG_BUILD_DEPENDS:=golang\/host luci-base\/host/' \
   package/UA3F/openwrt/Makefile
 
+# --- 2b. 运行时 apk 源裁剪（2026-09-29 实测：缺失会让路由器 apk update / iStore 刷源报错） ---
+# base-files 生成 /etc/apk/repositories.d/distfeeds.list 时把 feeds.conf.default 里的
+# 每个 feed 名都拼到官方发布仓库 URL（%U/packages/%A/<feed>）下；easytier/istore 是
+# 第三方源，官方仓库没有对应目录 → 运行时必报 wget error 8（404）。
+# 上游对自家 feed 已有先例（sed '/fanchmwrt/d'），此处按同一约定一并剔除；
+# iStore 的运行时源由 luci-app-store 自带的 compat.list 提供，不受影响。
+sed -i "s|sed -i '/fanchmwrt/d' \$(1)/etc/apk/repositories.d/distfeeds.list|sed -i -e '/fanchmwrt/d' -e '/easytier/d' -e '/istore/d' \$(1)/etc/apk/repositories.d/distfeeds.list|" \
+  package/base-files/Makefile
+grep -q "'/easytier/d'" package/base-files/Makefile || {
+  echo "ERROR: distfeeds third-party feed prune failed to apply (upstream base-files/Makefile changed?)" >&2
+  exit 1
+}
+
 # --- 3. UA3F 开机竞态修复（优先级最高的需求，必须应用成功才允许出镜像） ---
 # 根因：开机时 WAN 默认路由未就绪 → BPF TC "no eligible interfaces" → 连续崩溃后
 # procd 默认只重试 5 次即放弃 → 裸 UA 出网触发校园网封禁。
