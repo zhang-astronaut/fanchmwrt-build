@@ -1,0 +1,10 @@
+#!/bin/sh
+# filter_aaaa 初始安全值=1：校园网 WAN 无全球 IPv6（eth4 无 RA、DHCPv6 无租约，
+# 2026-09-30 实测）。此后由 /etc/hotplug.d/iface/99-fwx-filter-aaaa 按上游实况
+# 动态纠偏：上游真有 IPv6 且 LAN 能拿到全球地址（或 relay 透传）时自动放行
+# AAAA，否则一律过滤（杜绝客户端拿到不可达 IPv6，aria2/Motrix 报
+# WSAENETUNREACH 10051）。删除本文件与 hotplug 钩子即恢复上游默认行为。
+[ -f /etc/config/dhcp ] || exit 0
+uci -q set dhcp.@dnsmasq[0].filter_aaaa='1' || exit 0
+uci commit dhcp
+exit 0

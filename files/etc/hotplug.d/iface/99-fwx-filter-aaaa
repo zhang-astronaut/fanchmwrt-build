@@ -1,0 +1,32 @@
+#!/bin/sh
+# 动态 filter_aaaa：仅当"上游真有 IPv6 且 LAN 能用上"时放行 AAAA，否则过滤。
+# 判定（allow_aaaa）：路由器存在 v6 默认路由，且满足其一——
+#   a) br-lan 有全球单播地址（2000::/3，odhcpd 可直接公告给客户端）；
+#   b) dhcp.lan 配置 ra/dhcpv6=relay（透传上游 RA，客户端自行取得全球地址）。
+# 只有默认路由而无前缀/PD/relay 时（典型校园网）仍过滤——路由器有 v6 不代表客户端有。
+# 初始值由 uci-defaults 99-fwx-filter-aaaa 置 1（安全侧）；本钩子在 iface
+# 事件（含 boot 时 lan ifup）上纠偏，状态未变时不动作，杜绝 dnsmasq 无谓 reload。
+[ "$ACTION" = ifup ] || [ "$ACTION" = ifdown ] || exit 0
+
+allow_aaaa() {
+	ip -6 route show 2>/dev/null | grep -qE '^(default|::/0)' || return 1
+	ip -6 addr show dev br-lan 2>/dev/null | grep -qE 'inet6 (2|3)[0-9a-fA-F]{3}:' && return 0
+	[ "$(uci -q get dhcp.lan.ra)" = relay ] && return 0
+	[ "$(uci -q get dhcp.lan.dhcpv6)" = relay ] && return 0
+	return 1
+}
+
+target=1
+allow_aaaa && target=0
+
+cur=$(uci -q get dhcp.@dnsmasq[0].filter_aaaa)
+# 选项缺失在 dnsmasq 侧等于不过滤（视为 0），不能当 1 跳过——
+# 否则上游默认配置若不带显式 option，首启缺口永远无人补
+[ -z "$cur" ] && cur=0
+[ "$cur" = "$target" ] && exit 0
+
+uci set dhcp.@dnsmasq[0].filter_aaaa="$target"
+uci commit dhcp
+/etc/init.d/dnsmasq reload 2>/dev/null || /etc/init.d/dnsmasq restart
+logger -t fwx-filter-aaaa "filter_aaaa -> $target ($( [ "$target" = 0 ] && echo 'upstream IPv6 usable' || echo 'no usable upstream IPv6' ))"
+exit 0

@@ -19,6 +19,13 @@
 - **SRunPy 校园网自动登录**（深澜）：`srunpy` + `luci-app-srunpy` + `python3-requests`，
   源自 [HofNature/SRunPy-OpenWRT](https://github.com/HofNature/SRunPy-OpenWRT)；
   Release 附上游 apk/ipk 便于其它机器侧载。
+- **dnsmasq AAAA 自适应过滤**（`files/etc/{uci-defaults,hotplug.d/iface}/99-fwx-filter-aaaa`）：
+  校园网 WAN 无全球 IPv6（无 RA/PD），不过滤时客户端拿到全球 AAAA 却无路由，aria2/Motrix
+  不回退 IPv4，双栈域名全报 `WSAENETUNREACH 10051`（"A socket operation was attempted to
+  an unreachable network"）。动态逻辑：默认 `filter_aaaa=1`（安全侧），hotplug 钩子在 iface
+  事件上检测"路由器有 v6 默认路由 **且** br-lan 有全球地址（或 dhcp.lan ra/dhcpv6=relay）"
+  才放行 AAAA——只有默认路由而无前缀的校园网形态不会被误放行；状态未变不动作。
+  2026-09-30 已在实机 uci 生效并闭环验证。上游真给 IPv6 后无需任何操作，自动恢复双栈。
 
 ### 监控
 - **用户会话统计（UA3F TPROXY 下可用）**：`package/user-sessiond-ct`。

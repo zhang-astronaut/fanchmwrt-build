@@ -6,6 +6,7 @@
 #   4. fwx 流量统计 TPROXY 补丁（应用失败仅告警不阻断，详见 README）
 #   5. 合并 Chelsio 内核配置片段（按符号去重后追加，兼容 config-6.x 文件名变化）
 #   6. 拷贝 package/ 下的本地包（约定：目录名 = 包名）
+#   7. 拷贝 files/ rootfs overlay（uci-defaults 等），应用后断言关键内容
 set -euo pipefail
 
 REPO_ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -91,5 +92,18 @@ for d in "$REPO_ROOT"/package/*/; do
   rm -rf "package/$name"
   cp -a "$d" "package/"
 done
+
+# --- 7. files/ rootfs overlay（uci-defaults 等；构建系统原生把树根 files/ 合入 rootfs） ---
+if [ -d "$REPO_ROOT/files" ]; then
+  mkdir -p "$OW/files"
+  cp -a "$REPO_ROOT/files/." "$OW/files/"
+  UDEF="$OW/files/etc/uci-defaults/99-fwx-filter-aaaa"
+  HOOK="$OW/files/etc/hotplug.d/iface/99-fwx-filter-aaaa"
+  [ -f "$UDEF" ] || { echo "ERROR: files overlay copy failed ($UDEF missing)" >&2; exit 1; }
+  grep -q "filter_aaaa='1'" "$UDEF" || { echo "ERROR: $UDEF 关键内容丢失（filter_aaaa 断言失效）" >&2; exit 1; }
+  [ -f "$HOOK" ] || { echo "ERROR: files overlay copy failed ($HOOK missing)" >&2; exit 1; }
+  grep -q "allow_aaaa" "$HOOK" || { echo "ERROR: $HOOK 关键内容丢失（动态纠偏断言失效）" >&2; exit 1; }
+  echo "files/ overlay copied"
+fi
 
 echo "prepare-tree: done"
