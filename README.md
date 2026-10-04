@@ -27,6 +27,26 @@
   才放行 AAAA——只有默认路由而无前缀的校园网形态不会被误放行；状态未变不动作。
   2026-09-30 已在实机 uci 生效并闭环验证。上游真给 IPv6 后无需任何操作，自动恢复双栈。
 
+### 网关 / 旁路由模式
+- **fwx 工作模式**（`fwx.network.work_mode`，0=网关 / 1=旁路由）只影响 fwx 统计/行为层：
+  仪表盘"实时流量"的监控接口（网关=wan 设备；旁路由=br-lan——客户端、docker、EasyTier
+  全部经它出网，流量不漏）、内核 hook 语义、客户端 IPv6 统计。**不触碰 DHCP/防火墙/伪装**，
+  这些按角色做一次性手动配置（旁路由形态：软路由 lan 网关指主路由、关自身 DHCP、lan 区开伪装）。
+- **自动自适应**（`files/etc/hotplug.d/iface/99-fwx-work-mode`）：iface 事件后 20s 判定——
+  wan 有 IPv4 租约 → 网关；wan 无租约且默认路由经 br-lan → 旁路由；开机过渡态不动作。
+  逃生开关 `uci set fwx.network.work_mode_auto='0'`；也可在 LuCI「网络设置→工作模式」手动切。
+- **ua3f 三项自愈**（2026-10-05 旁路由实测踩坑后固化，勿回退）：
+  1. `uci-defaults/99-fwx-ua3f-offload` + 钩子按 wan 载波动态纠偏 `l3_rewrite_bpf_offload`：
+     BPF TC offload 在 wan 无载波时启动即崩溃循环（"no eligible interfaces for TC"），
+     旁路由形态 wan 永久无载波；UA 改写实际走 nft TPROXY 路径，offload 关掉无损。
+  2. 钩子在 ua3f 运行中于 ifup 幂等补回 `ip rule fwmark 0x1c9 lookup 457`：netifd reload
+     （LuCI 改网络配置）会清外来 ip rule，清掉后流量"能上网但 UA 全裸"且计数器照涨，极难察觉。
+  3. `fwx-monitor-device.patch`：fwxd 不再把 wan 设备名写死进 `fwx.dashboard.monitor_device`
+     （旧逻辑冷启动写一次、永不重评，角色切换后流量图永远盯着已拔线的网卡），改为按
+     work_mode 每采样周期动态解析；仪表盘设置页的显式选择仍然生效。
+- **旧版本配置保留升级到本版本后**，清一次历史粘滞值即可恢复自动跟随：
+  `uci -q delete fwx.dashboard.monitor_device; uci commit fwx; /etc/init.d/fwx restart`
+
 ### 监控
 - **用户会话统计（UA3F TPROXY 下可用）**：`package/user-sessiond-ct`。
   闭源 `fwx_user.ko` 在 TPROXY 下会话表为空，本包用 `/proc/net/arp` + `/proc/net/nf_conntrack`
@@ -36,6 +56,7 @@
   LuCI 与采样器**禁止双写** hist 文件；5min/1h 曲线必须按各自 step 分桶。
 - **fwx 流量统计 TPROXY 补丁**（`fwx-tproxy-stat.patch`）：统计点从 FORWARD 改到
   PRE/POST_ROUTING，TPROXY 流量不漏计。上游 fwx 变动导致补丁失配时 CI 仅告警不阻断。
+- **fwx 仪表盘监控设备自适应补丁**（`fwx-monitor-device.patch`）：见上文「网关 / 旁路由模式」。
 
 ### QoS / 网络硬件
 - **SQM（主）**：`sqm-scripts` + LuCI（Cake / fq_codel，含 cake、fq-pie、ifb kmod）。
@@ -90,6 +111,7 @@ required-packages.txt         # 必须进镜像的包（单一来源，增删包
 forbidden-packages.txt        # 禁止进镜像的包（终态守护）
 fanchmwrt.config              # seed 配置（defconfig 展开后再由 REQUIRED 回填）
 fwx-tproxy-stat.patch         # fwx 流量统计 TPROXY 补丁
+fwx-monitor-device.patch      # fwx 仪表盘监控设备自适应补丁（旁路由）
 upstream_sha                  # 上次成功编译的上游 commit（CI 自动维护）
 package/
   user-sessiond-ct/           # 会话统计（采样器 + LuCI controller + user_sessiond）
@@ -135,6 +157,9 @@ bash scripts/selfcheck.sh        # 改完仓库先跑：脚本语法 / 清单格
 5. 磁盘：Disk Manager 可分区挂载
 6. DHCP/DNS：客户端 DNS = `192.168.100.1`（路由器 dnsmasq → 国内上游）
 7. 无 PassWall/xray/sing-box 残留
+8. 模式自适应（旁路由形态验证）：主页"实时流量 (br-lan)"有真实曲线；
+   `uci get ua3f.main.l3_rewrite_bpf_offload` 为 0（wan 无载波时被钩子纠偏）；
+   `ip rule show` 含 `fwmark 0x1c9 lookup 457`
 
 ### 首次刷机后的一次性网络配置（uci，按需）
 

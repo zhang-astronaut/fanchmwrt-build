@@ -1,0 +1,12 @@
+#!/bin/sh
+# ua3f 的 BPF TC offload 需要所有网卡载波正常；旁路由形态下 wan(eth4) 永久无载波，
+# 会让 ua3f 启动即崩溃循环（"no eligible interfaces for TC"），UA 改写完全失效。
+# 安全默认=0：UA 改写实际由 nft TPROXY 路径完成，offload 只影响 L3/TCP 字段改写。
+# 动态纠偏见 hotplug 钩子 99-fwx-ua3f-rules（仅在 wan 无载波时生效，网关模式不受影响）。
+# 仅在 ua3f 包自带的配置文件已存在时修改，避免抢跑其创建逻辑。
+[ -f /etc/config/ua3f ] || exit 0
+[ "$(uci -q get ua3f.main.l3_rewrite_bpf_offload)" = "0" ] || {
+    uci set ua3f.main.l3_rewrite_bpf_offload='0'
+    uci commit ua3f
+}
+exit 0

@@ -49,6 +49,25 @@ else
   fail=1
 fi
 
+udef2="files/etc/uci-defaults/99-fwx-ua3f-offload"
+hook2="files/etc/hotplug.d/iface/99-fwx-ua3f-rules"
+hook3="files/etc/hotplug.d/iface/99-fwx-work-mode"
+if [ -f "$udef2" ] && grep -q "l3_rewrite_bpf_offload='0'" "$udef2" \
+   && [ -f "$hook2" ] && grep -q "fwmark 0x1c9 lookup 457" "$hook2" \
+   && [ -f "$hook3" ] && grep -q "work_mode_auto" "$hook3"; then
+  echo "  OK   files overlay (ua3f offload/策略路由自愈 + work_mode 自适应)"
+else
+  echo "  FAIL files overlay ua3f/work-mode guards incomplete ($udef2 / $hook2 / $hook3)" >&2
+  fail=1
+fi
+
+# files/ 里的 shell 内容也要过语法检查（此前只查 scripts/*.sh，钩子语法错误会
+# 静默失效——2026-10-05 ua3f 自愈钩子教训）
+for f in files/etc/hotplug.d/iface/* files/etc/uci-defaults/*; do
+  [ -f "$f" ] || continue
+  if sh -n "$f"; then echo "  OK   $f (syntax)"; else echo "  FAIL $f (syntax)" >&2; fail=1; fi
+done
+
 # 用 awk 检测 CRLF：避免向 grep 传裸 CR 参数（MSYS 下有被吞成空模式的风险），
 # 也顺带排除二进制文件
 crlf=$(find . -path ./.git -prune -o \( -type f ! -name '*.img' ! -name '*.gz' \) -print0 2>/dev/null \

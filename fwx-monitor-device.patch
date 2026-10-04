@@ -1,0 +1,65 @@
+diff --git a/package/fcm/fwxd/src/fwx_ubus.c b/package/fcm/fwxd/src/fwx_ubus.c
+index 6f93cab..b60c432 100644
+--- a/package/fcm/fwxd/src/fwx_ubus.c
++++ b/package/fcm/fwxd/src/fwx_ubus.c
+@@ -6510,7 +6510,7 @@ static void add_interface_traffic_point(unsigned long long up_bytes, unsigned lo
+     LOG_DEBUG("add_interface_traffic_point: up_rate=%u B/s, down_rate=%u B/s\n", up_rate, down_rate);
+ }
+ 
+-void check_and_update_monitor_device(void) {    
++void check_and_update_monitor_device(void) {
+     char monitor_device[64] = {0};
+     char wan_device_name[16] = {0};
+ 
+@@ -6518,19 +6518,29 @@ void check_and_update_monitor_device(void) {
+     struct uci_context *uci_ctx = uci_alloc_context();
+     if (!uci_ctx)
+         return;
+-    
++
++    /* fwx.dashboard.monitor_device is a USER override (dashboard setting
++     * page) only. fwxd used to auto-write the wan device here on cold start,
++     * which made a stale value stick forever: after the box was repurposed
++     * as a bypass gateway the traffic chart kept watching the unplugged wan
++     * device (eth4) and showed nothing. Resolve dynamically instead, honour
++     * an explicit user value, and never write back. */
+     int ret = fwx_uci_get_value(uci_ctx, "fwx.dashboard.monitor_device", monitor_device, sizeof(monitor_device));
+     if (ret == 0 && strlen(monitor_device) > 0) {
+         strncpy(g_interface_name, monitor_device, sizeof(g_interface_name) - 1);
+     }
+     else{
+-        if (get_interface_device("wan", wan_device_name, sizeof(wan_device_name)) == 0 && strlen(wan_device_name) > 0) {
+-            strncpy(g_interface_name, wan_device_name, sizeof(g_interface_name) - 1);
++        /* Bypass mode (work_mode=1) counts the whole uplink on br-lan:
++         * clients, docker and EasyTier traffic all egress there, so nothing
++         * is lost. Gateway mode (work_mode=0) counts the wan device. */
++        int work_mode = fwx_uci_get_int_value(uci_ctx, "fwx.network.work_mode");
++        if (work_mode == 1) {
++            strncpy(g_interface_name, "br-lan", sizeof(g_interface_name) - 1);
++        } else if (get_interface_device("wan", wan_device_name, sizeof(wan_device_name)) == 0 && strlen(wan_device_name) > 0) {
++            strncpy(g_interface_name, wan_device_name, sizeof(wan_device_name) - 1);
+         } else {
+             strcpy(g_interface_name, "br-lan");
+         }
+-        fwx_uci_set_value(uci_ctx, "fwx.dashboard.monitor_device", g_interface_name);
+-        fwx_uci_commit(uci_ctx, "fwx");
+     }
+     uci_free_context(uci_ctx);
+ }
+@@ -6538,11 +6548,11 @@ void check_and_update_monitor_device(void) {
+ 
+ void collect_interface_traffic_rate(void) {
+     unsigned long long up_bytes = 0, down_bytes = 0;
+-    if (strlen(g_interface_name) == 0){
+-        check_and_update_monitor_device();
+-        if (strlen(g_interface_name) == 0) {
+-            return;
+-        }
++    /* Re-resolve every cycle so role/device changes are followed live
++     * instead of being frozen by one cold-start decision. */
++    check_and_update_monitor_device();
++    if (strlen(g_interface_name) == 0) {
++        return;
+     }
+ 
+     if (read_interface_traffic(g_interface_name, &up_bytes, &down_bytes) == 0)

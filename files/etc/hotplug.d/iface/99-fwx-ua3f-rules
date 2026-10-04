@@ -1,0 +1,24 @@
+#!/bin/sh
+# ua3f 自愈钩子（旁路由模式必需）：
+# 1) netifd reload（LuCI 改网络配置）会清掉外来 ip rule —— ua3f TPROXY 依赖
+#    fwmark 0x1c9 策略路由把流量导进 127.0.0.1:1080；规则被清后流量"能上网
+#    但 UA 全裸"（tproxy 计数器照涨，极难察觉）。ua3f 运行中时在 ifup 幂等补回；
+#    开机阶段 ua3f 未启动则跳过（由 ua3f 启动时装载，避免抢占其初始化）。
+# 2) ua3f 的 BPF TC offload 需要所有网卡载波正常；旁路由下 wan 永久无载波会让
+#    它启动即崩溃循环。仅在 wan 无载波时纠偏为 0，网关模式不受影响。
+
+[ "$ACTION" = ifup ] || exit 0
+
+if pgrep ua3f >/dev/null 2>&1; then
+    ip rule show | grep -q "fwmark 0x1c9 lookup 457" || ip rule add fwmark 0x1c9 lookup 457
+    ip route show table 457 | grep -q "local" || ip route add local 0.0.0.0/0 dev lo table 457
+fi
+
+WANDEV=$(uci -q get network.wan.device)
+if [ -f /etc/config/ua3f ] && [ -n "$WANDEV" ] && ! grep -qs "^1$" "/sys/class/net/$WANDEV/carrier"; then
+    [ "$(uci -q get ua3f.main.l3_rewrite_bpf_offload)" = "0" ] || {
+        uci set ua3f.main.l3_rewrite_bpf_offload='0'
+        uci commit ua3f
+    }
+fi
+exit 0

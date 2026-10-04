@@ -72,6 +72,21 @@ else
   echo "::warning::fwx-tproxy-stat.patch no longer applies (upstream fwx changed); continuing without it"
 fi
 
+# --- 4b. fwx 仪表盘监控设备自适应补丁（旁路由模式流量显示自愈，详见 README） ---
+# 旧逻辑在冷启动时把 wan 设备名写死进 fwx.dashboard.monitor_device 且永不重评，
+# 角色切换成旁路由后流量图永远盯着已拔线的网卡。补丁改为按 work_mode 动态解析
+# （旁路由=br-lan，客户端/docker/EasyTier 全部经它出网，流量不漏），不再回写 uci，
+# 显式用户设置（dashboard 设置页）仍然生效。
+MONITOR_PATCH="$REPO_ROOT/fwx-monitor-device.patch"
+if git apply --check "$MONITOR_PATCH" 2>/dev/null; then
+  git apply "$MONITOR_PATCH"
+  echo "fwx-monitor-device.patch applied"
+elif patch -p1 --forward < "$MONITOR_PATCH" >/dev/null 2>&1; then
+  echo "::warning::fwx-monitor-device.patch applied via patch(1) with fuzz"
+else
+  echo "::warning::fwx-monitor-device.patch no longer applies (upstream fwx changed); continuing without it"
+fi
+
 # --- 5. Chelsio 内核配置片段合并（去重，避免裸 cat >> 产生重复符号定义） ---
 KCFG=$(ls target/linux/x86/config-* 2>/dev/null | head -n1)
 [ -n "$KCFG" ] || { echo "ERROR: target/linux/x86/config-* not found" >&2; exit 1; }
@@ -103,6 +118,12 @@ if [ -d "$REPO_ROOT/files" ]; then
   grep -q "filter_aaaa='1'" "$UDEF" || { echo "ERROR: $UDEF 关键内容丢失（filter_aaaa 断言失效）" >&2; exit 1; }
   [ -f "$HOOK" ] || { echo "ERROR: files overlay copy failed ($HOOK missing)" >&2; exit 1; }
   grep -q "allow_aaaa" "$HOOK" || { echo "ERROR: $HOOK 关键内容丢失（动态纠偏断言失效）" >&2; exit 1; }
+  UDEF2="$OW/files/etc/uci-defaults/99-fwx-ua3f-offload"
+  HOOK2="$OW/files/etc/hotplug.d/iface/99-fwx-ua3f-rules"
+  HOOK3="$OW/files/etc/hotplug.d/iface/99-fwx-work-mode"
+  [ -f "$UDEF2" ] && grep -q "l3_rewrite_bpf_offload='0'" "$UDEF2" || { echo "ERROR: $UDEF2 缺失或关键内容丢失（ua3f offload 安全默认断言失效）" >&2; exit 1; }
+  [ -f "$HOOK2" ] && grep -q "fwmark 0x1c9 lookup 457" "$HOOK2" || { echo "ERROR: $HOOK2 缺失或关键内容丢失（ua3f 策略路由自愈断言失效）" >&2; exit 1; }
+  [ -f "$HOOK3" ] && grep -q "work_mode_auto" "$HOOK3" || { echo "ERROR: $HOOK3 缺失或关键内容丢失（work_mode 自适应断言失效）" >&2; exit 1; }
   echo "files/ overlay copied"
 fi
 

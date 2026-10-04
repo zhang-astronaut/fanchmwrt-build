@@ -1,0 +1,36 @@
+#!/bin/sh
+# fwx 工作模式自适应（网关=0 / 旁路由=1）。fwx 的 work_mode 只影响统计/行为层
+# （仪表盘流量接口、内核 hook 语义、客户端 IPv6 统计），不触碰 DHCP/防火墙/伪装——
+# 那些仍按 README 的角色配置手动做一次性设置。
+# 判据（保守，避免开机竞态误判）：
+#   wan 拿到 IPv4 租约              -> 网关(0)
+#   wan 无租约 且 默认路由经 br-lan  -> 旁路由(1)
+#   其余（开机过渡态/无默认路由）    -> 不动作
+# 逃生开关：uci set fwx.network.work_mode_auto='0' 后本钩子不再改写。
+
+[ "$ACTION" = ifup ] || [ "$ACTION" = ifdown ] || exit 0
+[ "$(uci -q get fwx.network.work_mode_auto)" = "0" ] && exit 0
+
+(
+    sleep 20
+    [ "$(uci -q get fwx.network.work_mode_auto)" = "0" ] && exit 0
+
+    WAN_LEASE=$(ubus -S call network.interface.wan status 2>/dev/null | jsonfilter -q -e "@['ipv4-address'][0].address" 2>/dev/null)
+    if [ -n "$WAN_LEASE" ]; then
+        TARGET=0
+    elif [ "$(ubus -S call network.interface.lan status 2>/dev/null | jsonfilter -q -e "@.up" 2>/dev/null)" = "true" ] \
+         && ip -4 route show default 2>/dev/null | grep -q "dev br-lan"; then
+        TARGET=1
+    else
+        exit 0
+    fi
+
+    CUR=$(uci -q get fwx.network.work_mode)
+    [ "$CUR" = "$TARGET" ] && exit 0
+
+    uci set fwx.network.work_mode="$TARGET"
+    uci commit fwx
+    [ -f /proc/sys/fwx/work_mode ] && echo "$TARGET" > /proc/sys/fwx/work_mode
+    logger -t fwx-work-mode "fwx work_mode auto-set to $TARGET (wan_lease=${WAN_LEASE:+yes})"
+) &
+exit 0
