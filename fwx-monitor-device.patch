@@ -1,8 +1,29 @@
 diff --git a/package/fcm/fwxd/src/fwx_ubus.c b/package/fcm/fwxd/src/fwx_ubus.c
-index 6f93cab..b60c432 100644
+index 6f93cab..0467823 100644
 --- a/package/fcm/fwxd/src/fwx_ubus.c
 +++ b/package/fcm/fwxd/src/fwx_ubus.c
-@@ -6510,7 +6510,7 @@ static void add_interface_traffic_point(unsigned long long up_bytes, unsigned lo
+@@ -5993,12 +5993,16 @@ static struct json_object *get_dashboard_system_status(void) {
+ static struct json_object *get_dashboard_network_status(void) {
+     struct json_object *network_status = json_object_new_object();
+     struct uci_context *uci_ctx = uci_alloc_context();
+-    
+ 
+-    int work_mode = 1; 
++
++    /* The authoritative key is fwx.network.work_mode (kernel proc, fwx_user
++     * and the dashboard traffic interface all follow it). This used to read
++     * appfilter.global.work_mode — a second source of truth that stayed 0 in
++     * bypass mode, so the dashboard disagreed with the actual work mode. */
++    int work_mode = 0;
+     if (uci_ctx) {
+-        work_mode = fwx_uci_get_int_value(uci_ctx, "appfilter.global.work_mode");
+-        if (work_mode < 0) work_mode = 1;
++        work_mode = fwx_uci_get_int_value(uci_ctx, "fwx.network.work_mode");
++        if (work_mode != 0 && work_mode != 1) work_mode = 0;
+     }
+     json_object_object_add(network_status, "work_mode", json_object_new_int(work_mode));
+     
+@@ -6510,7 +6514,7 @@ static void add_interface_traffic_point(unsigned long long up_bytes, unsigned lo
      LOG_DEBUG("add_interface_traffic_point: up_rate=%u B/s, down_rate=%u B/s\n", up_rate, down_rate);
  }
  
@@ -11,7 +32,7 @@ index 6f93cab..b60c432 100644
      char monitor_device[64] = {0};
      char wan_device_name[16] = {0};
  
-@@ -6518,19 +6518,29 @@ void check_and_update_monitor_device(void) {
+@@ -6518,19 +6522,29 @@ void check_and_update_monitor_device(void) {
      struct uci_context *uci_ctx = uci_alloc_context();
      if (!uci_ctx)
          return;
@@ -46,7 +67,7 @@ index 6f93cab..b60c432 100644
      }
      uci_free_context(uci_ctx);
  }
-@@ -6538,11 +6548,11 @@ void check_and_update_monitor_device(void) {
+@@ -6538,11 +6552,11 @@ void check_and_update_monitor_device(void) {
  
  void collect_interface_traffic_rate(void) {
      unsigned long long up_bytes = 0, down_bytes = 0;
