@@ -61,6 +61,9 @@ luci-app-easytier
 openssh-sftp-server
 dropbear
 
+# --- DHCP 侦听（旁路由模式下学习终端主机名，fwxd 回退读取） ---
+dhcp-snooper
+
 # --- iStore 软件中心及其依赖（+tar 依赖问题在 CI 里修正） ---
 luci-app-store
 taskd

@@ -44,6 +44,14 @@
   3. `fwx-monitor-device.patch`：fwxd 不再把 wan 设备名写死进 `fwx.dashboard.monitor_device`
      （旧逻辑冷启动写一次、永不重评，角色切换后流量图永远盯着已拔线的网卡），改为按
      work_mode 每采样周期动态解析；仪表盘设置页的显式选择仍然生效。
+- **旁路由统计口径**：监控接口为 br-lan——网桥收发无法区分上下行（每个包各计一次 rx 和 tx，
+  rx≈tx≈总量），故仪表盘曲线在旁路由下自动改为**逐客户端速率求和**（与流量排行同源、方向正确）；
+  fwx 内核统计钩子只归账 LAN 子网内的 IP，上游主路由不会被误记成"幻影终端"。
+- **旁路由下的终端名称**：fwxd 从 `/tmp/dhcp.leases` 读主机名，该文件只由本机 DHCP 生成。
+  两种方案：① 让软路由发 DHCP（下发的网关/DNS 选项不变，双 DHCP 过渡期无害）——代价是
+  主路由面板看不到名字；② 保持主路由 DHCP + **dhcp-snooper 组件**（默认启用）：被动监听
+  局域网 DHCP 广播学习 MAC→主机名（写入 `/tmp/dhcp_snoop.leases`，fwxd 回退读取），
+  两边面板都有名字，设备重连后即学到。也可用用户管理页设置手动昵称（优先级最高）。
 - **旧版本配置保留升级到本版本后**，清一次历史粘滞值即可恢复自动跟随：
   `uci -q delete fwx.dashboard.monitor_device; uci commit fwx; /etc/init.d/fwx restart`
 

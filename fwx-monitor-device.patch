@@ -1,8 +1,67 @@
 diff --git a/package/fcm/fwxd/src/fwx_ubus.c b/package/fcm/fwxd/src/fwx_ubus.c
-index 6f93cab..661f9b1 100644
+index 6f93cab..9bddc51 100644
 --- a/package/fcm/fwxd/src/fwx_ubus.c
 +++ b/package/fcm/fwxd/src/fwx_ubus.c
-@@ -5993,12 +5993,16 @@ static struct json_object *get_dashboard_system_status(void) {
+@@ -125,24 +125,47 @@ void get_hostname_by_mac(char *mac, char *hostname)
+ {
+     if (!mac || !hostname)
+         return;
++    int found = 0;
+     FILE *fp = fopen("/tmp/dhcp.leases", "r");
+-    if (!fp)
++    if (fp)
+     {
+-        printf("open dhcp lease file....failed\n");
+-        return;
++        char line_buf[256] = {0};
++        while (fgets(line_buf, sizeof(line_buf), fp))
++        {
++            char hostname_buf[128] = {0};
++            char mac_buf[32] = {0};
++            sscanf(line_buf, "%*s %s %*s %s", mac_buf, hostname_buf);
++            if (0 == strcmp(mac, mac_buf))
++            {
++                strcpy(hostname, hostname_buf);
++                found = 1;
++            }
++        }
++        fclose(fp);
+     }
+-    char line_buf[256] = {0};
+-    while (fgets(line_buf, sizeof(line_buf), fp))
++
++    /* Bypass mode: the upstream router serves DHCP, so /tmp/dhcp.leases
++     * stays empty and terminals would show as bare MACs. dhcp-snooper
++     * passively learns MAC -> hostname from broadcast DHCP on the LAN and
++     * keeps a lease-format file; use it as fallback only. */
++    if (found)
++        return;
++    fp = fopen("/tmp/dhcp_snoop.leases", "r");
++    if (fp)
+     {
+-        char hostname_buf[128] = {0};
+-        char mac_buf[32] = {0};
+-        sscanf(line_buf, "%*s %s %*s %s", mac_buf, hostname_buf);
+-        if (0 == strcmp(mac, mac_buf))
++        char line_buf[256] = {0};
++        while (fgets(line_buf, sizeof(line_buf), fp))
+         {
+-            strcpy(hostname, hostname_buf);
++            char hostname_buf[128] = {0};
++            char mac_buf[32] = {0};
++            sscanf(line_buf, "%*s %s %*s %s", mac_buf, hostname_buf);
++            if (0 == strcmp(mac, mac_buf))
++            {
++                strcpy(hostname, hostname_buf);
++            }
+         }
++        fclose(fp);
+     }
+-    fclose(fp);
+ }
+ 
+ 
+@@ -5993,12 +6016,16 @@ static struct json_object *get_dashboard_system_status(void) {
  static struct json_object *get_dashboard_network_status(void) {
      struct json_object *network_status = json_object_new_object();
      struct uci_context *uci_ctx = uci_alloc_context();
@@ -23,7 +82,7 @@ index 6f93cab..661f9b1 100644
      }
      json_object_object_add(network_status, "work_mode", json_object_new_int(work_mode));
      
-@@ -6510,7 +6514,7 @@ static void add_interface_traffic_point(unsigned long long up_bytes, unsigned lo
+@@ -6510,7 +6537,7 @@ static void add_interface_traffic_point(unsigned long long up_bytes, unsigned lo
      LOG_DEBUG("add_interface_traffic_point: up_rate=%u B/s, down_rate=%u B/s\n", up_rate, down_rate);
  }
  
@@ -32,7 +91,7 @@ index 6f93cab..661f9b1 100644
      char monitor_device[64] = {0};
      char wan_device_name[16] = {0};
  
-@@ -6518,31 +6522,80 @@ void check_and_update_monitor_device(void) {
+@@ -6518,31 +6545,80 @@ void check_and_update_monitor_device(void) {
      struct uci_context *uci_ctx = uci_alloc_context();
      if (!uci_ctx)
          return;
