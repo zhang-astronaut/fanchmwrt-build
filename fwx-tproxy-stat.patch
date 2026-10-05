@@ -1,5 +1,5 @@
 diff --git a/package/fcm/fwx/src/fwx_client.c b/package/fcm/fwx/src/fwx_client.c
-index a5f7185b9a..179305650f 100644
+index 73ce087..304c15f 100644
 --- a/package/fcm/fwx/src/fwx_client.c
 +++ b/package/fcm/fwx/src/fwx_client.c
 @@ -565,12 +565,15 @@ static inline int get_packet_dir(struct net_device *in)
@@ -23,7 +23,27 @@ index a5f7185b9a..179305650f 100644
  	AF_LMT_DEBUG("period flow down:%llu up: %llu pkg up %d\n", node->period_flow.down_bytes, 
  		node->period_flow.up_bytes, node->rate.pkt_up_rate);
  
-@@ -712,41 +715,22 @@ static u_int32_t af_client_hook2(unsigned int hook,
+@@ -652,6 +655,19 @@ static u_int32_t af_client_hook(unsigned int hook,
+ 	if (PKT_DIR_UP != pkt_dir)
+ 		return NF_ACCEPT;
+ 
++	/* Bypass mode: br-lan ingress carries both client uploads and packets
++	 * arriving from the upstream router (src MAC = upstream, src IP = a
++	 * remote NATed address). Without this filter the upstream router ends
++	 * up as a phantom client accumulating all download traffic. Only
++	 * attribute sources inside the LAN subnet; fwxd keeps fwx_lan_ip and
++	 * fwx_lan_mask current via /proc/sys/fwx. */
++	if (skb->protocol == htons(ETH_P_IP)) {
++		iph = ip_hdr(skb);
++		if (iph && fwx_lan_mask != 0 &&
++		    (iph->saddr & fwx_lan_mask) != (fwx_lan_ip & fwx_lan_mask))
++			return NF_ACCEPT;
++	}
++
+ 	ethhdr = eth_hdr(skb);
+ 	if (ethhdr)
+ 	{
+@@ -712,41 +728,22 @@ static u_int32_t af_client_hook2(unsigned int hook,
  								 int (*okfn)(struct sk_buff *))
  {
  #endif
@@ -72,7 +92,7 @@ index a5f7185b9a..179305650f 100644
  
  	AF_CLIENT_LOCK_R();
  	
-@@ -777,15 +761,20 @@ static u_int32_t af_client_hook2(unsigned int hook,
+@@ -777,15 +774,20 @@ static u_int32_t af_client_hook2(unsigned int hook,
  #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 16, 0)
  static struct nf_hook_ops af_client_ops[] = {
  	{

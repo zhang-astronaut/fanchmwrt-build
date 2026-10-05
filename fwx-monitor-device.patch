@@ -1,5 +1,5 @@
 diff --git a/package/fcm/fwxd/src/fwx_ubus.c b/package/fcm/fwxd/src/fwx_ubus.c
-index 6f93cab..0467823 100644
+index 6f93cab..661f9b1 100644
 --- a/package/fcm/fwxd/src/fwx_ubus.c
 +++ b/package/fcm/fwxd/src/fwx_ubus.c
 @@ -5993,12 +5993,16 @@ static struct json_object *get_dashboard_system_status(void) {
@@ -32,7 +32,7 @@ index 6f93cab..0467823 100644
      char monitor_device[64] = {0};
      char wan_device_name[16] = {0};
  
-@@ -6518,19 +6522,29 @@ void check_and_update_monitor_device(void) {
+@@ -6518,31 +6522,80 @@ void check_and_update_monitor_device(void) {
      struct uci_context *uci_ctx = uci_alloc_context();
      if (!uci_ctx)
          return;
@@ -67,8 +67,29 @@ index 6f93cab..0467823 100644
      }
      uci_free_context(uci_ctx);
  }
-@@ -6538,11 +6552,11 @@ void check_and_update_monitor_device(void) {
  
+ 
++static void add_interface_traffic_rate_point(unsigned int up_rate, unsigned int down_rate) {
++    u_int32_t current_time = time(NULL);
++    interface_traffic_node_t *node = (interface_traffic_node_t *)calloc(1, sizeof(interface_traffic_node_t));
++    if (!node)
++        return;
++
++    node->up_rate = up_rate;
++    node->down_rate = down_rate;
++    node->timestamp = current_time;
++
++    list_add(&node->list, &interface_traffic_list);
++    interface_traffic_count++;
++
++    if (interface_traffic_count > MAX_INTERFACE_TRAFFIC_POINTS) {
++        interface_traffic_node_t *old_node = list_last_entry(&interface_traffic_list, interface_traffic_node_t, list);
++        list_del(&old_node->list);
++        free(old_node);
++        interface_traffic_count--;
++    }
++}
++
  void collect_interface_traffic_rate(void) {
      unsigned long long up_bytes = 0, down_bytes = 0;
 -    if (strlen(g_interface_name) == 0){
@@ -80,6 +101,24 @@ index 6f93cab..0467823 100644
 +     * instead of being frozen by one cold-start decision. */
 +    check_and_update_monitor_device();
 +    if (strlen(g_interface_name) == 0) {
++        return;
++    }
++
++    /* A bridge (br-lan) carries both client directions, so its rx/tx
++     * counters are near-identical and cannot split upload/download —
++     * the chart would show two identical lines in bypass mode. When
++     * monitoring br-lan, derive the chart from the per-client rates
++     * instead (same accounting the traffic ranking uses). */
++    if (strcmp(g_interface_name, "br-lan") == 0) {
++        unsigned long long up_rate_sum = 0;
++        unsigned long long down_rate_sum = 0;
++        client_node_t *node = NULL;
++        list_for_each_entry(node, &client_list, client) {
++            up_rate_sum += node->up_rate;
++            down_rate_sum += node->down_rate;
++        }
++        add_interface_traffic_rate_point((unsigned int)up_rate_sum,
++                                         (unsigned int)down_rate_sum);
 +        return;
      }
  
