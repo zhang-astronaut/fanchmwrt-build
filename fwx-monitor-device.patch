@@ -311,3 +311,28 @@ index f82c7bf..504af9b 100644
  }
  
  void clean_client_nickname_iter(void *arg, client_node_t *client)
+diff --git a/package/fcm/fwxd/src/main.c b/package/fcm/fwxd/src/main.c
+index 32c2fd2..85c48a2 100644
+--- a/package/fcm/fwxd/src/main.c
++++ b/package/fcm/fwxd/src/main.c
+@@ -43,6 +43,7 @@ int g_feature_update = 0;
+ 
+ extern void check_and_cleanup_history_data_by_size(void);
+ extern void collect_interface_traffic_rate(void);
++extern void update_client_from_kernel(void);
+ 
+ fwx_status_t g_fwx_status = {
+     .internet = 1  
+@@ -381,7 +382,11 @@ void fwx_timeout_handler(struct uloop_timeout *t)
+         save_all_client_backup_to_files();
+     }
+     
+-    if (count % 2 == 0) {  
++    if (count % 2 == 0) {
++        /* Refresh per-client kernel rates right before the chart samples
++         * them: update_client_list() only runs every 10s, which made the
++         * bypass traffic chart step at 10s instead of 2s. */
++        update_client_from_kernel();
+         collect_interface_traffic_rate();
+     }
+ 
