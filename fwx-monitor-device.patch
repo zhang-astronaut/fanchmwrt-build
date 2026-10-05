@@ -222,3 +222,92 @@ index 6f93cab..28f97a5 100644
      return interface_traffic;
  }
  
+diff --git a/package/fcm/fwxd/src/fwx_user.c b/package/fcm/fwxd/src/fwx_user.c
+index f82c7bf..504af9b 100644
+--- a/package/fcm/fwxd/src/fwx_user.c
++++ b/package/fcm/fwxd/src/fwx_user.c
+@@ -1885,31 +1885,66 @@ void update_client_hostname(void)
+     char ip_buf[32] = {0};
+ 
+     FILE *fp = fopen("/tmp/dhcp.leases", "r");
+-    if (!fp)
+-    {
+-        printf("open dhcp lease file....failed\n");
+-        return;
+-    }
+-    while (fgets(line_buf, sizeof(line_buf), fp))
++    if (fp)
+     {
+-        if (strlen(line_buf) <= 16)
+-            continue;
+-        sscanf(line_buf, "%*s %s %s %s", mac_buf, ip_buf, hostname_buf);
+-        client_node_t *node = find_client_node(mac_buf);
+-        if (!node)
++        while (fgets(line_buf, sizeof(line_buf), fp))
+         {
+-            node = add_client_node(mac_buf);
+-            strncpy(node->ip, ip_buf, sizeof(node->ip));
+-            node->online = 0;
+-            node->offline_time = get_timestamp();
++            if (strlen(line_buf) <= 16)
++                continue;
++            hostname_buf[0] = '\0';
++            mac_buf[0] = '\0';
++            ip_buf[0] = '\0';
++            sscanf(line_buf, "%*s %s %s %s", mac_buf, ip_buf, hostname_buf);
++            client_node_t *node = find_client_node(mac_buf);
++            if (!node)
++            {
++                node = add_client_node(mac_buf);
++                strncpy(node->ip, ip_buf, sizeof(node->ip));
++                node->online = 0;
++                node->offline_time = get_timestamp();
++            }
++
++            if (strlen(hostname_buf) > 0 && hostname_buf[0] != '*')
++            {
++                strncpy(node->hostname, hostname_buf, sizeof(node->hostname));
++            }
+         }
++        fclose(fp);
++    }
+ 
+-        if (strlen(hostname_buf) > 0 && hostname_buf[0] != '*')
++    /* Bypass mode: the upstream router serves DHCP, so /tmp/dhcp.leases
++     * stays empty and terminals would show as bare MACs. dhcp-snooper
++     * learns MAC -> hostname from broadcast DHCP on the LAN into
++     * /tmp/dhcp_snoop.leases; merge it as a fallback (local leases win
++     * because they are scanned first). */
++    fp = fopen("/tmp/dhcp_snoop.leases", "r");
++    if (fp)
++    {
++        while (fgets(line_buf, sizeof(line_buf), fp))
+         {
+-            strncpy(node->hostname, hostname_buf, sizeof(node->hostname));
++            if (strlen(line_buf) <= 16)
++                continue;
++            hostname_buf[0] = '\0';
++            mac_buf[0] = '\0';
++            ip_buf[0] = '\0';
++            sscanf(line_buf, "%*s %s %s %s", mac_buf, ip_buf, hostname_buf);
++            client_node_t *node = find_client_node(mac_buf);
++            if (!node)
++            {
++                node = add_client_node(mac_buf);
++                if (strcmp(ip_buf, "*") != 0)
++                    strncpy(node->ip, ip_buf, sizeof(node->ip));
++                node->online = 0;
++                node->offline_time = get_timestamp();
++            }
++
++            if (strlen(hostname_buf) > 0 && hostname_buf[0] != '*')
++            {
++                strncpy(node->hostname, hostname_buf, sizeof(node->hostname));
++            }
+         }
++        fclose(fp);
+     }
+-    fclose(fp);
+ }
+ 
+ void clean_client_nickname_iter(void *arg, client_node_t *client)
