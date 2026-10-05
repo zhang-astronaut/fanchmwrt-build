@@ -1,5 +1,5 @@
 diff --git a/package/fcm/fwxd/src/fwx_ubus.c b/package/fcm/fwxd/src/fwx_ubus.c
-index 6f93cab..9bddc51 100644
+index 6f93cab..28f97a5 100644
 --- a/package/fcm/fwxd/src/fwx_ubus.c
 +++ b/package/fcm/fwxd/src/fwx_ubus.c
 @@ -125,24 +125,47 @@ void get_hostname_by_mac(char *mac, char *hostname)
@@ -182,3 +182,43 @@ index 6f93cab..9bddc51 100644
      }
  
      if (read_interface_traffic(g_interface_name, &up_bytes, &down_bytes) == 0)
+@@ -6554,24 +6630,28 @@ static struct json_object *get_dashboard_interface_traffic(void) {
+     json_object_object_add(interface_traffic, "interface", json_object_new_string(g_interface_name));
+     struct json_object *traffic_array = json_object_new_array();
+     interface_traffic_node_t *node = NULL;
+-    list_for_each_entry_reverse(node, &interface_traffic_list, list) {
++
++    /* While the history buffer is still filling up after boot, pad the
++     * OLDEST side (array start) so the live edge stays at the rightmost
++     * point. The old code padded the newest side, which made the curve
++     * grow left-to-right like a static drawing for the first ~2 minutes. */
++    int pad = MAX_INTERFACE_TRAFFIC_POINTS - interface_traffic_count;
++    while (pad-- > 0) {
+         struct json_object *traffic = json_object_new_object();
+-        json_object_object_add(traffic, "up", json_object_new_int64(node->up_rate));
+-        json_object_object_add(traffic, "down", json_object_new_int64(node->down_rate));
++        json_object_object_add(traffic, "up", json_object_new_int64(0));
++        json_object_object_add(traffic, "down", json_object_new_int64(0));
+         json_object_array_add(traffic_array, traffic);
+     }
+-    
+-    int current_count = interface_traffic_count;
+-    while (current_count < MAX_INTERFACE_TRAFFIC_POINTS) {
++
++    list_for_each_entry_reverse(node, &interface_traffic_list, list) {
+         struct json_object *traffic = json_object_new_object();
+-        json_object_object_add(traffic, "up", json_object_new_int64(0));
+-        json_object_object_add(traffic, "down", json_object_new_int64(0));
++        json_object_object_add(traffic, "up", json_object_new_int64(node->up_rate));
++        json_object_object_add(traffic, "down", json_object_new_int64(node->down_rate));
+         json_object_array_add(traffic_array, traffic);
+-        current_count++;
+     }
+-    
++
+     json_object_object_add(interface_traffic, "traffic", traffic_array);
+-    
++
+     return interface_traffic;
+ }
+ 
